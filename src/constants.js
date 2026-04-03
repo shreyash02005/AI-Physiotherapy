@@ -1,5 +1,5 @@
 // ============================================================
-// AI Physio Copilot — Exercise Configurations & Constants
+// VIZO — Exercise Configurations & Constants
 // ============================================================
 
 // MediaPipe CDN URLs
@@ -28,21 +28,25 @@ export const EXERCISES = [
     targetSets: 3,
     jointAngles: [
       { landmarks: [12, 14, 16], minAngle: 30, maxAngle: 160, label: 'Right Elbow' },
+      { landmarks: [11, 13, 15], minAngle: 30, maxAngle: 160, label: 'Left Elbow' },
     ],
     phases: {
-      down: { angle: 75, direction: 'below' },
-      up: { angle: 125, direction: 'above' },
+      down: { angle: 85, direction: 'below' }, // Contracted peak (target)
+      up: { angle: 135, direction: 'above' },  // Returns to start
     },
-    primaryAngleLandmarks: [12, 14, 16],
+    primaryAngleLandmarks: [[11, 13, 15], [12, 14, 16]], // Left/Right arms
     compensationRules: [
       {
         id: 'elbow-flare',
         name: 'Elbow Flare',
         check: (lm) => {
           if (!lm[14] || !lm[24]) return false;
-          return Math.abs(lm[14].x - lm[24].x) > 0.12;
+          const lMove = Math.abs(lm[13]?.y - lm[15]?.y || 0);
+          const rMove = Math.abs(lm[14]?.y - lm[16]?.y || 0);
+          if (rMove > lMove) return Math.abs(lm[14].x - lm[24].x) > 0.14;
+          return Math.abs(lm[13].x - lm[23].x) > 0.14;
         },
-        message: 'Keep your elbows close to your body',
+        message: 'Keep your elbows tucked into your sides',
       },
       {
         id: 'shoulder-swing',
@@ -54,7 +58,7 @@ export const EXERCISES = [
         message: 'Avoid swinging your shoulders',
       },
     ],
-    side: 'right',
+    side: 'both',
   },
   {
     id: 'squats',
@@ -64,14 +68,14 @@ export const EXERCISES = [
     targetReps: 12,
     targetSets: 3,
     jointAngles: [
-      { landmarks: [24, 26, 28], minAngle: 70, maxAngle: 170, label: 'Right Knee' },
-      { landmarks: [23, 25, 27], minAngle: 70, maxAngle: 170, label: 'Left Knee' },
+      { landmarks: [24, 26, 28], minAngle: 70, maxAngle: 175, label: 'Right Knee' },
+      { landmarks: [23, 25, 27], minAngle: 70, maxAngle: 175, label: 'Left Knee' },
     ],
     phases: {
-      down: { angle: 115, direction: 'below' },
-      up: { angle: 140, direction: 'above' },
+      down: { angle: 120, direction: 'below' }, 
+      up: { angle: 145, direction: 'above' },
     },
-    primaryAngleLandmarks: [24, 26, 28],
+    primaryAngleLandmarks: [[23, 25, 27], [24, 26, 28]],
     compensationRules: [
       {
         id: 'knee-cave',
@@ -105,20 +109,19 @@ export const EXERCISES = [
     targetSets: 3,
     jointAngles: [
       { landmarks: [24, 12, 14], minAngle: 60, maxAngle: 170, label: 'Right Shoulder' },
+      { landmarks: [23, 11, 13], minAngle: 60, maxAngle: 170, label: 'Left Shoulder' },
     ],
     phases: {
-      down: { angle: 135, direction: 'above' },
-      up: { angle: 105, direction: 'below' },
+      down: { angle: 150, direction: 'above' }, 
+      up: { angle: 110, direction: 'below' },
     },
-    primaryAngleLandmarks: [24, 12, 14],
+    primaryAngleLandmarks: [[23, 11, 13], [24, 12, 14]],
     compensationRules: [
       {
         id: 'trunk-lean',
         name: 'Trunk Lean',
         check: (lm) => {
           if (!lm[11] || !lm[12] || !lm[23] || !lm[24]) return false;
-          const shoulderMidY = (lm[11].y + lm[12].y) / 2;
-          const hipMidY = (lm[23].y + lm[24].y) / 2;
           const shoulderMidX = (lm[11].x + lm[12].x) / 2;
           const hipMidX = (lm[23].x + lm[24].x) / 2;
           return Math.abs(shoulderMidX - hipMidX) > 0.06;
@@ -126,7 +129,7 @@ export const EXERCISES = [
         message: 'Keep your torso straight, avoid leaning',
       },
     ],
-    side: 'right',
+    side: 'both',
   },
   {
     id: 'lunges',
@@ -136,13 +139,14 @@ export const EXERCISES = [
     targetReps: 12,
     targetSets: 3,
     jointAngles: [
-      { landmarks: [24, 26, 28], minAngle: 70, maxAngle: 170, label: 'Right Knee' },
+      { landmarks: [24, 26, 28], minAngle: 70, maxAngle: 175, label: 'Right Knee' },
+      { landmarks: [23, 25, 27], minAngle: 70, maxAngle: 175, label: 'Left Knee' },
     ],
     phases: {
-      down: { angle: 115, direction: 'below' },
-      up: { angle: 140, direction: 'above' },
+      down: { angle: 120, direction: 'below' }, 
+      up: { angle: 145, direction: 'above' },
     },
-    primaryAngleLandmarks: [24, 26, 28],
+    primaryAngleLandmarks: [[23, 25, 27], [24, 26, 28]],
     compensationRules: [
       {
         id: 'knee-over-toe',
@@ -154,7 +158,7 @@ export const EXERCISES = [
         message: 'Keep your knee behind your toes',
       },
     ],
-    side: 'right',
+    side: 'both',
   },
   {
     id: 'lateral-raises',
@@ -165,12 +169,13 @@ export const EXERCISES = [
     targetSets: 3,
     jointAngles: [
       { landmarks: [24, 12, 16], minAngle: 10, maxAngle: 100, label: 'Right Shoulder Abduction' },
+      { landmarks: [23, 11, 15], minAngle: 10, maxAngle: 100, label: 'Left Shoulder Abduction' },
     ],
     phases: {
-      down: { angle: 55, direction: 'above' },
-      up: { angle: 45, direction: 'below' },
+      down: { angle: 65, direction: 'above' }, 
+      up: { angle: 35, direction: 'below' },
     },
-    primaryAngleLandmarks: [24, 12, 16],
+    primaryAngleLandmarks: [[23, 11, 15], [24, 12, 16]],
     compensationRules: [
       {
         id: 'shrug',
@@ -182,7 +187,7 @@ export const EXERCISES = [
         message: 'Relax your shoulders, avoid shrugging',
       },
     ],
-    side: 'right',
+    side: 'both',
   },
   {
     id: 'knee-extensions',
@@ -192,13 +197,14 @@ export const EXERCISES = [
     targetReps: 12,
     targetSets: 3,
     jointAngles: [
-      { landmarks: [24, 26, 28], minAngle: 70, maxAngle: 170, label: 'Right Knee' },
+      { landmarks: [24, 26, 28], minAngle: 70, maxAngle: 175, label: 'Right Knee' },
+      { landmarks: [23, 25, 27], minAngle: 70, maxAngle: 175, label: 'Left Knee' },
     ],
     phases: {
-      down: { angle: 135, direction: 'above' },
+      down: { angle: 140, direction: 'above' }, 
       up: { angle: 115, direction: 'below' },
     },
-    primaryAngleLandmarks: [24, 26, 28],
+    primaryAngleLandmarks: [[23, 25, 27], [24, 26, 28]],
     compensationRules: [
       {
         id: 'hip-lift',
@@ -210,13 +216,39 @@ export const EXERCISES = [
         message: 'Keep your hips level on the seat',
       },
     ],
-    side: 'right',
+    side: 'both',
   },
 ];
+
+// Default settings
+export const DEFAULT_SETTINGS = {
+  userName: 'User',
+  defaultReps: 12,
+  defaultSets: 3,
+  restDuration: 30,
+  audioEnabled: true,
+  audioVolume: 0.8,
+  audioSpeed: 1.0,
+  cameraResolution: '1280x720',
+  cameraFacing: 'user',
+  highContrast: false,
+  largerText: false,
+};
+
+// Load persisted data from localStorage
+function loadFromStorage(key, fallback) {
+  try {
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 // Initial reducer state
 export const INITIAL_STATE = {
   screen: 'home',
+  tab: 'dashboard',
   selectedExercise: null,
   customReps: 12,
   customSets: 3,
@@ -228,8 +260,9 @@ export const INITIAL_STATE = {
   streak: 0,
   bestStreak: 0,
   bestAvgScore: 0,
-  sessionHistory: [],
+  sessionHistory: loadFromStorage('vizo_sessionHistory', []),
   isMuted: false,
   restTime: 30,
   cameraError: null,
+  settings: loadFromStorage('vizo_settings', DEFAULT_SETTINGS),
 };

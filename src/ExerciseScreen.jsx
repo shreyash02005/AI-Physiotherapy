@@ -1,19 +1,46 @@
 // ============================================================
-// Exercise Session HUD Screen (Stitch Design)
+// VIZO — Exercise Session HUD Screen
 // ============================================================
 import React, { useRef, useEffect, useCallback, useState } from 'react';
-import { Volume2, VolumeX, AlertTriangle, Square, ArrowLeft, Play } from 'lucide-react';
+import { Volume2, VolumeX, AlertTriangle, Square, ArrowLeft, Play, Timer } from 'lucide-react';
 import { LANDMARK_CONNECTIONS } from './constants.js';
-import { calculateAngle, getFormScore, getPrimaryAngle, speak, playChime } from './utils.js';
+import { calculateAngle, getFormScore, getPrimaryAngle, smoothAngle, speak, playChime, cancelAllSpeech } from './utils.js';
 
 // Skeleton drawing colors
 const JOINT_COLORS = { good: '#10b981', moderate: '#f59e0b', poor: '#ef4444' };
 
+// Min time between reps (ms)
+const MIN_REP_DURATION = 600;
+// Min time in down phase before counting (ms)
+const MIN_DOWN_PHASE_DURATION = 200;
+// Slow down warning threshold (ms between reps)
+const SLOW_DOWN_THRESHOLD = 1500;
+// Slow down audio throttle (ms)
+const SLOW_DOWN_AUDIO_INTERVAL = 8000;
+
 export default function ExerciseScreen({ state, dispatch, videoRef, canvasRef, poseLandmarkerRef, animFrameRef, repPhaseRef, lastCompensationTimeRef, frameScoresRef, formScoreRef, compensationAlertRef }) {
-  const { selectedExercise, currentSet, currentRep, customSets, customReps, isMuted, streak } = state;
+  const { selectedExercise, currentSet, currentRep, customSets, customReps, isMuted, streak, settings } = state;
   const [hasStarted, setHasStarted] = useState(false);
+  const [showSlowDown, setShowSlowDown] = useState(false);
   const compensationTimersRef = useRef({});
   const processFrameRef = useRef(null);
+  const lastRepTimeRef = useRef(0);
+  const downPhaseStartRef = useRef(0);
+  const angleBufferRef = useRef([]);
+  const lastSlowDownSpeechRef = useRef(0);
+  const slowDownTimerRef = useRef(null);
+
+  // Stop camera helper
+  const stopCamera = useCallback(() => {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    if (videoRef.current?.srcObject) {
+      videoRef.current.srcObject.getTracks().forEach((t) => t.stop());
+      videoRef.current.srcObject = null;
+    }
+  }, [animFrameRef, videoRef]);
 
   // Start camera + detection loop on mount
   useEffect(() => {
@@ -21,8 +48,13 @@ export default function ExerciseScreen({ state, dispatch, videoRef, canvasRef, p
 
     const startCamera = async () => {
       try {
+        const [w, h] = (settings?.cameraResolution || '1280x720').split('x').map(Number);
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: 1280, height: 720 },
+          video: {
+            facingMode: settings?.cameraFacing || 'user',
+            width: w || 1280,
+            height: h || 720,
+          },
         });
         if (videoRef.current && mounted) {
           videoRef.current.srcObject = stream;
@@ -75,7 +107,6 @@ export default function ExerciseScreen({ state, dispatch, videoRef, canvasRef, p
     };
 
     const initAndStart = async () => {
-      // Initialize MediaPipe if not done
       if (!poseLandmarkerRef.current) {
         try {
           const vision = await import(
@@ -106,10 +137,8 @@ export default function ExerciseScreen({ state, dispatch, videoRef, canvasRef, p
 
     return () => {
       mounted = false;
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-      if (videoRef.current?.srcObject) {
-        videoRef.current.srcObject.getTracks().forEach((t) => t.stop());
-      }
+      stopCamera();
+      cancelAllSpeech();
     };
   }, []);
 
@@ -122,8 +151,8 @@ export default function ExerciseScreen({ state, dispatch, videoRef, canvasRef, p
     const w = canvas.width;
     const h = canvas.height;
 
-    // Draw connections
-    ctx.strokeStyle = 'rgba(99, 102, 241, 0.6)';
+    // Draw connections in emerald green
+    ctx.strokeStyle = 'rgba(78, 222, 163, 0.6)';
     ctx.lineWidth = 3;
     ctx.lineCap = 'round';
     for (const [i, j] of LANDMARK_CONNECTIONS) {
@@ -144,7 +173,6 @@ export default function ExerciseScreen({ state, dispatch, videoRef, canvasRef, p
     for (let i = 0; i < landmarks.length; i++) {
       const lm = landmarks[i];
       if (lm && lm.visibility > 0.5) {
-        // Only draw major landmarks (11-16, 23-28)
         if ((i >= 11 && i <= 16) || (i >= 23 && i <= 28)) {
           ctx.beginPath();
           ctx.arc(lm.x * w, lm.y * h, 6, 0, Math.PI * 2);
@@ -169,10 +197,16 @@ export default function ExerciseScreen({ state, dispatch, videoRef, canvasRef, p
     frameScoresRef.current.push(score);
     if (frameScoresRef.current.length > 30) frameScoresRef.current.shift();
 
-    // Rep counting
-    const angle = getPrimaryAngle(landmarks, selectedExercise);
-    if (angle !== null && hasStarted) {
-      countRep(angle, score);
+    // Angle smoothing
+    const rawAngle = getPrimaryAngle(landmarks, selectedExercise);
+    if (rawAngle !== null) {
+      angleBufferRef.current.push(rawAngle);
+      if (angleBufferRef.current.length > 5) angleBufferRef.current.shift();
+      const smoothedAngle = smoothAngle(angleBufferRef.current);
+
+      if (hasStarted) {
+        countRep(smoothedAngle, score);
+      }
     }
 
     // Compensation detection
@@ -185,29 +219,55 @@ export default function ExerciseScreen({ state, dispatch, videoRef, canvasRef, p
     processFrameRef.current = processFrame;
   }, [processFrame]);
 
-  // Rep counting state machine
+  // Improved rep counting state machine
   const countRep = useCallback((angle, currentScore) => {
     const { phases } = selectedExercise;
     const phase = repPhaseRef.current;
-    const HYSTERESIS = 10; // Reduced from 15 so reps are easier to hit with the new relaxed angles
+    const HYSTERESIS = 4; // Reduced from 8 for better sensitivity
+    const now = Date.now();
 
     if (phase === 'idle' || phase === 'up') {
-      // Check for down phase
       const threshold = phases.down.angle;
       const crossed = phases.down.direction === 'below'
         ? angle < threshold - HYSTERESIS
         : angle > threshold + HYSTERESIS;
       if (crossed) {
         repPhaseRef.current = 'down';
+        downPhaseStartRef.current = now;
       }
     } else if (phase === 'down') {
-      // Check for up phase (rep complete)
+      // Require minimum time in down phase
+      const downDuration = now - downPhaseStartRef.current;
+      if (downDuration < MIN_DOWN_PHASE_DURATION) return;
+
       const threshold = phases.up.angle;
       const crossed = phases.up.direction === 'below'
         ? angle < threshold - HYSTERESIS
         : angle > threshold + HYSTERESIS;
       if (crossed) {
+        // Enforce minimum rep duration
+        const timeSinceLastRep = now - lastRepTimeRef.current;
+        if (lastRepTimeRef.current > 0 && timeSinceLastRep < MIN_REP_DURATION) {
+          return; // Too fast, ignore
+        }
+
         repPhaseRef.current = 'up';
+        lastRepTimeRef.current = now;
+
+        // Check if user is going too fast — slow down prompt
+        if (lastRepTimeRef.current > 0 && timeSinceLastRep < SLOW_DOWN_THRESHOLD && timeSinceLastRep >= MIN_REP_DURATION) {
+          setShowSlowDown(true);
+          if (slowDownTimerRef.current) clearTimeout(slowDownTimerRef.current);
+          slowDownTimerRef.current = setTimeout(() => setShowSlowDown(false), 3000);
+
+          // Throttled audio
+          if (now - lastSlowDownSpeechRef.current > SLOW_DOWN_AUDIO_INTERVAL) {
+            lastSlowDownSpeechRef.current = now;
+            speak('Slow down for better form', 1, isMuted,
+              settings?.audioVolume || 0.8, settings?.audioSpeed || 1.0);
+          }
+        }
+
         // Count the rep
         const avgFrameScore = frameScoresRef.current.length > 0
           ? Math.round(frameScoresRef.current.reduce((a, b) => a + b, 0) / frameScoresRef.current.length)
@@ -215,9 +275,12 @@ export default function ExerciseScreen({ state, dispatch, videoRef, canvasRef, p
 
         dispatch({ type: 'COUNT_REP', payload: { score: avgFrameScore } });
         frameScoresRef.current = [];
+        angleBufferRef.current = [];
 
-        const newRepCount = currentRep + 1;
-        speak(`Rep ${newRepCount} of ${customReps}`, 2, isMuted);
+        // Correctly calculate local count for speech feedback
+        const newRepCount = (currentRep || 0) + 1;
+        speak(`Rep ${newRepCount} of ${customReps}`, 2, isMuted,
+          settings?.audioVolume || 0.8, settings?.audioSpeed || 1.0);
 
         if (avgFrameScore >= 85) {
           playChime('success');
@@ -229,8 +292,8 @@ export default function ExerciseScreen({ state, dispatch, videoRef, canvasRef, p
             speak(
               currentSet >= customSets
                 ? 'Session complete! Great work!'
-                : 'Great set! Rest for 30 seconds.',
-              2, isMuted
+                : `Great set! Rest for ${settings?.restDuration || 30} seconds.`,
+              2, isMuted, settings?.audioVolume || 0.8, settings?.audioSpeed || 1.0
             );
             dispatch({ type: 'COMPLETE_SET' });
             repPhaseRef.current = 'idle';
@@ -238,7 +301,7 @@ export default function ExerciseScreen({ state, dispatch, videoRef, canvasRef, p
         }
       }
     }
-  }, [selectedExercise, currentRep, customReps, currentSet, customSets, isMuted, dispatch]);
+  }, [selectedExercise, currentRep, customReps, currentSet, customSets, isMuted, dispatch, settings]);
 
   // Compensation detection
   const detectCompensation = useCallback((landmarks) => {
@@ -250,13 +313,13 @@ export default function ExerciseScreen({ state, dispatch, videoRef, canvasRef, p
         if (!compensationTimersRef.current[rule.id]) {
           compensationTimersRef.current[rule.id] = now;
         } else if (now - compensationTimersRef.current[rule.id] > 500) {
-          // If posture is continuously bad for 0.5s, check if we need to alert
           const lastTime = lastCompensationTimeRef.current[rule.id] || 0;
-          if (now - lastTime > 5000) { // 5 second timer for AI to remind
+          if (now - lastTime > 5000) {
             lastCompensationTimeRef.current[rule.id] = now;
             compensationAlertRef.current = { message: rule.message, time: now };
             dispatch({ type: 'ADD_COMPENSATION', payload: { ruleId: rule.id, name: rule.name, message: rule.message } });
-            speak(rule.message, 1, isMuted);
+            speak(rule.message, 1, isMuted,
+              settings?.audioVolume || 0.8, settings?.audioSpeed || 1.0);
             setTimeout(() => {
               if (compensationAlertRef.current?.time === now) {
                 compensationAlertRef.current = null;
@@ -265,92 +328,107 @@ export default function ExerciseScreen({ state, dispatch, videoRef, canvasRef, p
           }
         }
       } else {
-        // Reset timer if form corrects
         compensationTimersRef.current[rule.id] = null;
       }
     }
-  }, [selectedExercise, isMuted, dispatch]);
+  }, [selectedExercise, isMuted, dispatch, settings]);
+
+  const handleEndSession = () => {
+    stopCamera();
+    cancelAllSpeech();
+    dispatch({ type: 'END_SESSION' });
+  };
+
+  const handleBackToHome = () => {
+    stopCamera();
+    cancelAllSpeech();
+    dispatch({ type: 'RESET' });
+  };
 
   const formScore = formScoreRef.current;
   const alert = compensationAlertRef.current;
   const showAlert = alert && (Date.now() - alert.time < 3000);
 
   return (
-    <div className="fixed inset-0 overflow-hidden" style={{ backgroundColor: '#0f0f23' }}>
-      {/* Hidden video element (must have active dimensions to stream correctly, so opacity-0 is used instead of hidden) */}
+    <div className="fixed inset-0 overflow-hidden" style={{ backgroundColor: 'var(--gb-bg)' }}>
       <video ref={videoRef} autoPlay playsInline muted className="opacity-0 absolute w-px h-px pointer-events-none" />
-
-      {/* Canvas with video + skeleton */}
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full object-cover" />
 
-      {/* Camera loading/error state */}
+      {/* Camera error */}
       {state.cameraError && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-surface/80">
-          <div className="glass-panel rounded-2xl p-8 max-w-md text-center">
-            <AlertTriangle size={48} className="text-amber-400 mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-white mb-2">Camera Access Required</h3>
-            <p className="text-on-surface-variant">{state.cameraError}</p>
+        <div className="absolute inset-0 z-30 flex items-center justify-center" style={{ backgroundColor: 'rgba(7, 22, 16, 0.8)' }}>
+          <div className="glass-panel" style={{ padding: '2rem', maxWidth: '448px', textAlign: 'center' }}>
+            <AlertTriangle size={48} color="#fbbf24" style={{ margin: '0 auto 1rem' }} />
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#fff', marginBottom: '0.5rem' }}>Camera Access Required</h3>
+            <p style={{ color: 'var(--gb-text-dim)' }}>{state.cameraError}</p>
           </div>
         </div>
       )}
 
       {/* Top-Left: Exercise Info */}
-      <div className="absolute top-8 left-8 z-20 glass-panel rounded-2xl p-6 flex flex-col gap-1 min-w-[280px]">
+      <div className="glass-panel animate-fade-in" style={{ position: 'absolute', top: '2rem', left: '2rem', zIndex: 20, padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: '280px' }}>
         <button
-          onClick={() => dispatch({ type: 'RESET' })}
-          className="flex items-center gap-2 text-indigo-400 hover:text-indigo-300 transition-colors mb-4 text-sm font-bold w-fit"
+          onClick={handleBackToHome}
+          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--gb-primary)', background: 'none', border: 'none', cursor: 'pointer', marginBottom: '1rem', fontSize: '0.875rem', fontWeight: 700 }}
         >
           <ArrowLeft size={18} />
           Back to Home
         </button>
-        <span className="text-on-surface-variant text-xs font-bold uppercase tracking-widest opacity-70">Current Exercise</span>
-        <h2 className="text-3xl font-black tracking-tight text-white">{selectedExercise?.name}</h2>
-        <div className="flex items-end gap-3 mt-4">
-          <div className="flex flex-col">
-            <span className="text-on-surface-variant text-[10px] font-bold uppercase">Progress</span>
-            <p className="text-xl font-bold text-primary">Set {currentSet} of {customSets}</p>
+        <span style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.15em', color: 'var(--gb-text-muted)', opacity: 0.7 }}>Current Exercise</span>
+        <h2 className="font-headline" style={{ fontSize: '1.875rem', fontWeight: 900, color: '#fff', letterSpacing: '-0.01em' }}>
+          {selectedExercise?.name}
+        </h2>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
+          <div>
+            <span style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--gb-text-muted)' }}>Progress</span>
+            <p style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--gb-primary)' }}>Set {currentSet} of {customSets}</p>
           </div>
-          <div className="h-10 w-[1px] bg-white/10 mx-2" />
-          <div className="flex flex-col">
-            <span className="text-on-surface-variant text-[10px] font-bold uppercase">Rep Count</span>
-            <p className={`text-4xl font-black leading-none text-white ${streak > 3 ? 'animate-streak-pulse' : ''}`}>
-              {currentRep}<span className="text-lg font-medium text-on-surface-variant/60 ml-1">/ {customReps}</span>
+          <div style={{ height: '40px', width: '1px', background: 'rgba(255,255,255,0.1)', margin: '0 0.5rem' }} />
+          <div>
+            <span style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--gb-text-muted)' }}>Rep Count</span>
+            <p className={streak > 3 ? 'animate-streak-pulse' : ''} style={{ fontSize: '2.25rem', fontWeight: 900, color: '#fff', lineHeight: 1 }}>
+              {currentRep}<span style={{ fontSize: '1.125rem', fontWeight: 500, color: 'var(--gb-text-muted)', marginLeft: '0.25rem' }}>/ {customReps}</span>
             </p>
           </div>
         </div>
         {streak > 3 && (
-          <div className="mt-2 flex items-center gap-1 text-amber-400 text-xs font-bold">
+          <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#fbbf24', fontSize: '0.75rem', fontWeight: 700 }}>
             🔥 Streak: {streak}
           </div>
         )}
       </div>
 
       {/* Top-Right: Volume + Form Quality */}
-      <div className="absolute top-8 right-8 z-20 flex flex-col items-end gap-4">
+      <div style={{ position: 'absolute', top: '2rem', right: '2rem', zIndex: 20, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1rem' }}>
         <button
           onClick={() => dispatch({ type: 'TOGGLE_MUTE' })}
-          className="glass-panel rounded-full px-5 py-3 flex items-center gap-3 hover:bg-white/10 transition-colors cursor-pointer"
+          className="glass-panel"
+          style={{ padding: '0.75rem 1.25rem', borderRadius: '999px', display: 'flex', alignItems: 'center', gap: '0.75rem', color: '#fff', cursor: 'pointer', border: '1px solid rgba(255,255,255,0.1)' }}
         >
-          {isMuted ? <VolumeX size={20} className="text-white" /> : <Volume2 size={20} className="text-white" />}
-          <span className="text-xs font-bold uppercase tracking-widest text-white">
+          {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+          <span style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
             {isMuted ? 'Unmute AI' : 'Mute AI'}
           </span>
         </button>
 
-        <div className="glass-panel rounded-2xl p-6 min-w-[240px]">
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-on-surface-variant text-xs font-bold uppercase tracking-wider">Form Quality</span>
-            <span className="text-primary font-black text-lg">{formScore}%</span>
+        <div className="glass-panel" style={{ padding: '1.5rem', minWidth: '240px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <span style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--gb-text-muted)' }}>Form Quality</span>
+            <span style={{ color: 'var(--gb-primary)', fontWeight: 900, fontSize: '1.125rem' }}>{formScore}%</span>
           </div>
-          <div className="w-full h-3 bg-surface-container-highest rounded-full overflow-hidden">
+          <div style={{ width: '100%', height: '12px', background: 'var(--gb-surface-highest)', borderRadius: '999px', overflow: 'hidden' }}>
             <div
-              className={`h-full bg-gradient-to-r ${formScore >= 80 ? 'from-green-400 to-emerald-500' : formScore >= 60 ? 'from-yellow-400 to-amber-500' : 'from-red-400 to-rose-500'} transition-all duration-300`}
-              style={{ width: `${formScore}%` }}
+              style={{
+                height: '100%',
+                width: `${formScore}%`,
+                background: formScore >= 80 ? 'linear-gradient(90deg, #34d399, #10b981)' : formScore >= 60 ? 'linear-gradient(90deg, #fbbf24, #f59e0b)' : 'linear-gradient(90deg, #fb7185, #f43f5e)',
+                transition: 'width 0.3s ease-out',
+              }}
             />
           </div>
-          <div className="mt-3 flex gap-2 items-center">
-            <span className={`w-2 h-2 rounded-full ${formScore >= 80 ? 'bg-green-400' : formScore >= 60 ? 'bg-amber-400' : 'bg-red-400'} animate-pulse`} />
-            <span className="text-[10px] text-on-surface-variant font-medium">
+          <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: formScore >= 80 ? '#34d399' : formScore >= 60 ? '#fbbf24' : '#fb7185', animation: 'pulse-glow 2s infinite' }} />
+            <span style={{ fontSize: '0.625rem', color: 'var(--gb-text-dim)', fontWeight: 500 }}>
               {formScore >= 80 ? 'Optimal Form' : formScore >= 60 ? 'Moderate — Adjust form' : 'Needs Correction'}
             </span>
           </div>
@@ -359,38 +437,58 @@ export default function ExerciseScreen({ state, dispatch, videoRef, canvasRef, p
 
       {/* Bottom-Center: Compensation Alert */}
       {showAlert && (
-        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-20 w-full max-w-xl px-4 animate-slide-in">
-          <div className="glass-panel border-tertiary/30 rounded-2xl p-4 flex items-center gap-4 animate-bounce-subtle">
-            <div className="w-12 h-12 rounded-xl bg-tertiary-container/20 flex items-center justify-center">
-              <AlertTriangle size={24} className="text-tertiary" />
+        <div className="animate-slide-in" style={{ position: 'absolute', bottom: '7rem', left: '50%', transform: 'translateX(-50%)', zIndex: 20, width: '100%', maxWidth: '576px', padding: '0 1rem' }}>
+          <div className="glass-panel animate-bounce-subtle" style={{ border: '1px solid rgba(255,179,175,0.3)', padding: '1rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div style={{ width: '48px', height: '48px', borderRadius: '0.75rem', background: 'rgba(255,179,175,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <AlertTriangle size={24} color="#ffb3af" />
             </div>
             <div>
-              <h4 className="text-tertiary font-bold text-sm uppercase tracking-wide">Compensation Alert</h4>
-              <p className="text-white text-lg font-medium tracking-tight">{alert.message}</p>
+              <h4 style={{ color: '#ffb3af', fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Compensation Alert</h4>
+              <p style={{ color: '#fff', fontSize: '1.125rem', fontWeight: 500 }}>{alert.message}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Slow Down Warning */}
+      {showSlowDown && (
+        <div className="animate-fade-in" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 30 }}>
+          <div className="glass-panel" style={{ border: '1px solid rgba(245,158,11,0.3)', padding: '1.25rem 2rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <Timer size={28} color="#fbbf24" className="animate-pulse" />
+            <div>
+              <h4 style={{ color: '#fbbf24', fontWeight: 700, fontSize: '1rem' }}>Slow Down!</h4>
+              <p style={{ color: 'var(--gb-text-dim)', fontSize: '0.875rem' }}>Control your movement for better form</p>
             </div>
           </div>
         </div>
       )}
 
       {/* Bottom-Right: Session Action */}
-      <div className="absolute bottom-12 right-8 z-20 flex gap-4">
+      <div style={{ position: 'absolute', bottom: '3rem', right: '2rem', zIndex: 20, display: 'flex', gap: '1rem' }}>
         {!hasStarted ? (
           <button
             onClick={() => setHasStarted(true)}
-            className="group flex items-center gap-3 bg-emerald-500/20 hover:bg-emerald-500/40 backdrop-blur-md border border-emerald-500/50 px-8 py-4 rounded-full transition-all active:scale-95 shadow-[0_0_20px_rgba(16,185,129,0.3)]"
+            className="animate-pulse-glow"
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.5)',
+              padding: '1rem 2rem', borderRadius: '999px', cursor: 'pointer', transition: 'all 0.2s', activeScale: '0.95', backdropFilter: 'blur(12px)'
+            }}
           >
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-white font-black tracking-widest uppercase text-md">Start Exercise</span>
-            <Play size={20} className="text-white fill-current" />
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#4edea3' }} className="animate-pulse" />
+            <span style={{ color: '#fff', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', fontSize: '1rem' }}>Start Exercise</span>
+            <Play size={20} color="#fff" fill="currentColor" />
           </button>
         ) : (
           <button
-            onClick={() => dispatch({ type: 'END_SESSION' })}
-            className="group flex items-center gap-3 bg-error-container/20 hover:bg-error-container/40 backdrop-blur-md border border-error-container/50 px-8 py-4 rounded-full transition-all active:scale-95 shadow-[0_0_20px_rgba(239,68,68,0.2)]"
+            onClick={handleEndSession}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.5)',
+              padding: '1rem 2rem', borderRadius: '999px', cursor: 'pointer', transition: 'all 0.2s', activeScale: '0.95', backdropFilter: 'blur(12px)'
+            }}
           >
-            <div className="w-2 h-2 rounded-full bg-error animate-pulse" />
-            <span className="text-white font-bold tracking-wider uppercase text-sm">Quit Exercise</span>
-            <Square size={20} className="text-white" />
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#f87171' }} className="animate-pulse" />
+            <span style={{ color: '#fff', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.875rem' }}>Quit Exercise</span>
+            <Square size={20} color="#fff" />
           </button>
         )}
       </div>

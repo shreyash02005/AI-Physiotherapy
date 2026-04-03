@@ -1,14 +1,12 @@
 // ============================================================
-// AI Physio Copilot — Main App Component
-// All-in-one AI physical therapy app with MediaPipe pose tracking,
-// real-time form scoring, rep counting, compensation detection,
-// and audio coaching.
+// VIZO — Main App Component
 // ============================================================
 
 import React, { useReducer, useRef } from 'react';
 import { INITIAL_STATE } from './constants.js';
 import { sessionReducer } from './reducer.js';
-import HomeScreen from './HomeScreen.jsx';
+import { cancelAllSpeech, enableSpeech } from './utils.js';
+import Layout from './Layout.jsx';
 import ExerciseScreen from './ExerciseScreen.jsx';
 import RestScreen from './RestScreen.jsx';
 import SummaryScreen from './SummaryScreen.jsx';
@@ -27,6 +25,18 @@ export default function App() {
   const formScoreRef = useRef(0);
   const compensationAlertRef = useRef(null);
 
+  // Helper to stop camera
+  const stopCamera = () => {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    if (videoRef.current?.srcObject) {
+      videoRef.current.srcObject.getTracks().forEach((t) => t.stop());
+      videoRef.current.srcObject = null;
+    }
+  };
+
   // Reset refs when going back to home
   const handleDispatch = (action) => {
     if (action.type === 'START_SESSION') {
@@ -35,14 +45,27 @@ export default function App() {
       frameScoresRef.current = [];
       formScoreRef.current = 0;
       compensationAlertRef.current = null;
+      enableSpeech();
     }
+
+    // Stop camera and speech when leaving exercise
+    if (action.type === 'COMPLETE_SET' || action.type === 'END_SESSION') {
+      stopCamera();
+      cancelAllSpeech();
+    }
+
+    if (action.type === 'RESET') {
+      stopCamera();
+      cancelAllSpeech();
+    }
+
     dispatch(action);
   };
 
   // Render current screen
   switch (state.screen) {
     case 'home':
-      return <HomeScreen state={state} dispatch={handleDispatch} />;
+      return <Layout state={state} dispatch={handleDispatch} />;
 
     case 'exercise':
       return (
@@ -68,6 +91,6 @@ export default function App() {
       return <SummaryScreen state={state} dispatch={handleDispatch} />;
 
     default:
-      return <HomeScreen state={state} dispatch={handleDispatch} />;
+      return <Layout state={state} dispatch={handleDispatch} />;
   }
 }

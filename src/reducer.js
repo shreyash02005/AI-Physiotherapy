@@ -1,11 +1,26 @@
 // ============================================================
-// AI Physio Copilot — Session State Reducer
+// VIZO — Session State Reducer
 // ============================================================
 
-import { INITIAL_STATE } from './constants.js';
+import { INITIAL_STATE, DEFAULT_SETTINGS } from './constants.js';
+
+// Persist to localStorage
+function saveToStorage(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // localStorage unavailable or full
+  }
+}
 
 export function sessionReducer(state, action) {
   switch (action.type) {
+    case 'SET_TAB':
+      return {
+        ...state,
+        tab: action.payload,
+      };
+
     case 'SELECT_EXERCISE':
       return {
         ...state,
@@ -79,7 +94,7 @@ export function sessionReducer(state, action) {
         setHistory: newHistory,
         bestAvgScore: newBestAvg,
         repScores: [],
-        restTime: 30,
+        restTime: state.settings?.restDuration || 30,
       };
     }
 
@@ -87,7 +102,7 @@ export function sessionReducer(state, action) {
       return {
         ...state,
         screen: 'rest',
-        restTime: 30,
+        restTime: state.settings?.restDuration || 30,
       };
 
     case 'TICK_REST':
@@ -152,26 +167,59 @@ export function sessionReducer(state, action) {
         cameraError: action.payload,
       };
 
-    case 'RESET':
+    case 'UPDATE_SETTINGS': {
+      const newSettings = { ...state.settings, ...action.payload };
+      saveToStorage('gb_settings', newSettings);
+      return {
+        ...state,
+        settings: newSettings,
+        customReps: action.payload.defaultReps ?? state.customReps,
+        customSets: action.payload.defaultSets ?? state.customSets,
+      };
+    }
+
+    case 'RESET': {
+      const sessionEntry = {
+        date: new Date().toISOString(),
+        exercise: state.selectedExercise?.name,
+        exerciseId: state.selectedExercise?.id,
+        setHistory: state.setHistory,
+        totalReps: state.setHistory.reduce((sum, s) => sum + s.repScores.length, 0),
+        avgScore: state.setHistory.length > 0
+          ? Math.round(
+              state.setHistory.reduce((a, s) => a + s.avgScore, 0) /
+                state.setHistory.length
+            )
+          : 0,
+        compensationCount: state.compensationLog.length,
+        setsCompleted: state.setHistory.length,
+        targetSets: state.customSets,
+      };
+
+      const newSessionHistory = state.setHistory.length > 0
+        ? [...state.sessionHistory, sessionEntry]
+        : state.sessionHistory;
+
+      // Persist session history
+      saveToStorage('gb_sessionHistory', newSessionHistory);
+
       return {
         ...INITIAL_STATE,
-        sessionHistory: [
-          ...state.sessionHistory,
-          {
-            date: new Date().toISOString(),
-            exercise: state.selectedExercise?.name,
-            setHistory: state.setHistory,
-            avgScore: state.setHistory.length > 0
-              ? Math.round(
-                  state.setHistory.reduce((a, s) => a + s.avgScore, 0) /
-                    state.setHistory.length
-                )
-              : 0,
-          },
-        ],
+        sessionHistory: newSessionHistory,
         bestStreak: state.bestStreak,
         bestAvgScore: state.bestAvgScore,
+        settings: state.settings,
+        tab: state.tab,
       };
+    }
+
+    case 'CLEAR_HISTORY': {
+      saveToStorage('gb_sessionHistory', []);
+      return {
+        ...state,
+        sessionHistory: [],
+      };
+    }
 
     default:
       return state;

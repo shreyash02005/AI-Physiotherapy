@@ -1,5 +1,5 @@
 // ============================================================
-// Session Summary Screen (Stitch Design)
+// VIZO — Session Summary Screen
 // ============================================================
 import React, { useMemo, useEffect, useState } from 'react';
 import {
@@ -16,7 +16,7 @@ function Confetti() {
   const [pieces, setPieces] = useState([]);
 
   useEffect(() => {
-    const colors = ['#6366f1', '#8b5cf6', '#ec4899', '#10b981', '#f59e0b', '#c0c1ff'];
+    const colors = ['#10b981', '#4edea3', '#14b8a6', '#6ffbbe', '#f59e0b', '#9ed2b5'];
     const newPieces = Array.from({ length: 40 }, (_, i) => ({
       id: i,
       left: Math.random() * 100,
@@ -29,12 +29,14 @@ function Confetti() {
   }, []);
 
   return (
-    <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
+    <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 50, overflow: 'hidden' }}>
       {pieces.map((p) => (
         <div
           key={p.id}
           className="confetti-piece"
           style={{
+            position: 'absolute',
+            top: '-20px',
             left: `${p.left}%`,
             width: `${p.size}px`,
             height: `${p.size}px`,
@@ -107,33 +109,47 @@ export default function SummaryScreen({ state, dispatch }) {
       name: `Session ${i + 1}`,
     })), [sessionHistory]);
 
+  const chartStyle = {
+    background: '#13231c',
+    border: '1px solid #3c4a42',
+    borderRadius: '12px',
+    color: '#d4e7dd',
+  };
+
   return (
-    <div className="min-h-screen pb-24">
+    <div style={{ minHeight: '100vh', paddingBottom: '6rem', backgroundColor: 'var(--gb-bg)' }}>
       {showConfetti && <Confetti />}
 
       {/* Top Nav */}
-      <header className="bg-surface/80 backdrop-blur-xl fixed top-0 w-full z-40 flex justify-between items-center px-6 py-4">
-        <div className="flex items-center gap-4">
-          <button onClick={() => dispatch({ type: 'RESET' })} className="text-slate-400 hover:text-white transition-colors">
-            <ArrowLeft size={24} />
-          </button>
-          <span className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-500 to-violet-500 tracking-tight">
-            PhysioCopilot
-          </span>
-        </div>
+      <header className="navbar">
+        <nav style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 2.5rem', height: '64px', maxWidth: '1440px', margin: '0 auto', width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <button onClick={() => dispatch({ type: 'RESET' })} style={{ color: 'var(--gb-text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
+              <ArrowLeft size={24} />
+            </button>
+            <span className="text-gradient font-headline" style={{ fontSize: '1.25rem', fontWeight: 700 }}>
+              VIZO
+            </span>
+          </div>
+          <div style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--gb-primary)' }}>
+            SESSION COMPLETE
+          </div>
+        </nav>
       </header>
 
-      <main className="pt-24 px-4 md:px-12 max-w-7xl mx-auto bg-confetti min-h-screen">
+      <main style={{ paddingTop: '100px', paddingLeft: '1.5rem', paddingRight: '1.5rem', maxWidth: '1280px', margin: '0 auto' }}>
         {/* Hero: Grade Badge */}
-        <section className="flex flex-col items-center text-center mb-16 pt-8 animate-fade-in-up">
-          <div className="mb-6 relative">
-            <div className="absolute -inset-8 bg-emerald-500/20 blur-3xl rounded-full" />
-            <div className={`w-32 h-32 rounded-full bg-gradient-to-br ${grade.color} flex items-center justify-center border-4 border-white/20 shadow-[0_0_40px_rgba(16,185,129,0.3)]`}>
-              <span className="text-5xl font-black text-white italic tracking-tighter">{grade.letter}</span>
+        <section style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', marginBottom: '4rem', position: 'relative' }}>
+          <div style={{ marginBottom: '1.5rem', position: 'relative' }}>
+            <div style={{ position: 'absolute', top: '-2rem', left: '-2rem', right: '-2rem', bottom: '-2rem', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '50%', filter: 'blur(40px)' }} />
+            <div className="animate-fade-in" style={{ width: '128px', height: '128px', borderRadius: '50%', border: '4px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: grade.letter === 'A' ? 'linear-gradient(135deg, #34d399, #10b981)' : grade.letter === 'B' ? 'linear-gradient(135deg, #2dd4bf, #22d3ee)' : 'linear-gradient(135deg, #fbbf24, #f97316)', boxShadow: '0 0 40px rgba(16, 185, 129, 0.3)', position: 'relative', zIndex: 1 }}>
+              <span className="font-headline" style={{ fontSize: '3.5rem', fontWeight: 900, color: '#fff', fontStyle: 'italic', letterSpacing: '-0.05em' }}>{grade.letter}</span>
             </div>
           </div>
-          <h1 className="text-4xl md:text-6xl font-black tracking-tight text-white mb-4">Session Complete!</h1>
-          <p className="text-on-surface-variant text-lg max-w-lg mx-auto">
+          <h1 className="font-headline animate-fade-in-up" style={{ fontSize: 'clamp(2.5rem, 6vw, 4rem)', fontWeight: 900, color: '#fff', marginBottom: '1rem', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+            Session <span className="text-gradient">Complete!</span>
+          </h1>
+          <p className="animate-fade-in-up" style={{ color: 'var(--gb-text-dim)', fontSize: '1.125rem', maxWidth: '512px', margin: '0 auto', animationDelay: '0.1s' }}>
             {overallAvg >= 85
               ? `Outstanding consistency. You maintained peak form alignment throughout ${overallAvg}% of your movements today.`
               : overallAvg >= 70
@@ -143,48 +159,47 @@ export default function SummaryScreen({ state, dispatch }) {
         </section>
 
         {/* Stats Grid */}
-        <section className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-12">
+        <section style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '3rem' }}>
           {[
-            { icon: Dumbbell, value: totalReps, label: 'Total Reps', color: 'text-indigo-400', bg: 'bg-indigo-500/10' },
-            { icon: Target, value: `${overallAvg}%`, label: 'Avg Form Score', color: 'text-violet-400', bg: 'bg-violet-500/10' },
-            { icon: Flame, value: bestStreak, label: 'Best Streak', color: 'text-orange-400', bg: 'bg-orange-500/10' },
-            { icon: CheckCircle2, value: `${setHistory.length}/${state.customSets}`, label: 'Sets Completed', color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+            { icon: Dumbbell, value: totalReps, label: 'Total Reps', color: '#34d399', bg: 'rgba(52, 211, 153, 0.1)' },
+            { icon: Target, value: `${overallAvg}%`, label: 'Avg Form Score', color: '#2dd4bf', bg: 'rgba(45, 212, 191, 0.1)' },
+            { icon: Flame, value: bestStreak, label: 'Best Streak', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.1)' },
+            { icon: CheckCircle2, value: `${setHistory.length}/${state.customSets}`, label: 'Sets Completed', color: '#22d3ee', bg: 'rgba(6, 182, 212, 0.1)' },
           ].map(({ icon: Icon, value, label, color, bg }, i) => (
-            <div key={i} className="p-6 rounded-3xl backdrop-blur-xl bg-white/5 glass-inner-border border border-white/5 flex flex-col items-center text-center animate-fade-in-up" style={{ animationDelay: `${i * 0.1}s` }}>
-              <div className={`w-12 h-12 rounded-2xl ${bg} flex items-center justify-center ${color} mb-4`}>
+            <div key={i} className="glass-card animate-fade-in-up" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', borderRadius: '1.5rem', animationDelay: `${0.2 + i * 0.1}s` }}>
+              <div style={{ width: '48px', height: '48px', borderRadius: '1rem', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: color, marginBottom: '1rem' }}>
                 <Icon size={22} />
               </div>
-              <span className="text-3xl font-black text-white">{value}</span>
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest mt-1">{label}</span>
+              <span className="font-headline" style={{ fontSize: '1.875rem', fontWeight: 900, color: '#fff' }}>{value}</span>
+              <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--gb-text-muted)', textTransform: 'uppercase', letterSpacing: '0.15em', marginTop: '0.25rem' }}>{label}</span>
             </div>
           ))}
         </section>
 
         {/* Compensation + Charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-12">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '2rem', marginBottom: '3rem' }}>
           {/* Compensation List */}
-          <div className="lg:col-span-5 rounded-3xl p-8 border border-white/5 bg-white/5">
-            <h3 className="text-xl font-bold mb-8 flex items-center gap-2">
-              <AlertTriangle size={20} className="text-tertiary" />
+          <div className="glass-card" style={{ gridColumn: 'span 5', padding: '2rem', borderRadius: '2rem' }}>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#fff', marginBottom: '2rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <AlertTriangle size={20} color="#fbbf24" />
               Compensation Summary
             </h3>
             {compensationFreq.length === 0 ? (
-              <p className="text-slate-500 text-sm">No compensations detected — perfect form! 🎉</p>
+              <p style={{ color: 'var(--gb-text-muted)', fontSize: '0.875rem' }}>No compensations detected — perfect form! 🎉</p>
             ) : (
-              <div className="space-y-8">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
                 {compensationFreq.map((comp, i) => (
                   <div key={i}>
-                    <div className="flex justify-between items-end mb-2">
-                      <span className="text-on-surface font-semibold">{comp.name}</span>
-                      <span className="text-tertiary-fixed-dim font-bold">{comp.count} times</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '0.5rem' }}>
+                      <span style={{ color: 'var(--gb-text)', fontWeight: 600 }}>{comp.name}</span>
+                      <span style={{ color: '#fbbf24', fontWeight: 700, fontSize: '0.875rem' }}>{comp.count} times</span>
                     </div>
-                    <div className="h-3 w-full bg-surface-container-highest rounded-full overflow-hidden">
+                    <div style={{ height: '12px', width: '100%', background: 'var(--gb-surface-highest)', borderRadius: '999px', overflow: 'hidden' }}>
                       <div
-                        className="h-full bg-gradient-to-r from-tertiary-container to-tertiary rounded-full shadow-[0_0_12px_rgba(247,81,161,0.4)]"
-                        style={{ width: `${(comp.count / maxCompCount) * 100}%` }}
+                        style={{ height: '100%', width: `${(comp.count / maxCompCount) * 100}%`, background: 'linear-gradient(90deg, #f59e0b, #fbbf24)', borderRadius: '999px' }}
                       />
                     </div>
-                    <p className="text-xs text-slate-500 mt-2">{comp.message}</p>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--gb-text-dim)', marginTop: '0.5rem' }}>{comp.message}</p>
                   </div>
                 ))}
               </div>
@@ -192,78 +207,54 @@ export default function SummaryScreen({ state, dispatch }) {
           </div>
 
           {/* Charts */}
-          <div className="lg:col-span-7 flex flex-col gap-8">
+          <div style={{ gridColumn: 'span 7', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             {/* Line Chart */}
-            <div className="rounded-3xl p-6 border border-white/5 bg-white/5 flex-1">
-              <h4 className="font-bold text-slate-300 mb-6">Form Score Per Rep</h4>
+            <div className="glass-card" style={{ padding: '1.5rem', borderRadius: '1.5rem', flex: 1 }}>
+              <h4 style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--gb-text-dim)', marginBottom: '1.5rem' }}>Form Score Per Rep</h4>
               {repChartData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={140}>
                   <LineChart data={repChartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#333348" />
-                    <XAxis dataKey="rep" stroke="#908fa0" fontSize={10} />
-                    <YAxis domain={[0, 100]} stroke="#908fa0" fontSize={10} />
-                    <Tooltip contentStyle={{ background: '#1e1e32', border: '1px solid #464554', borderRadius: '8px', color: '#e2e0fc' }} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#3c4a42" />
+                    <XAxis dataKey="rep" stroke="#86948a" fontSize={10} />
+                    <YAxis domain={[0, 100]} stroke="#86948a" fontSize={10} />
+                    <Tooltip contentStyle={chartStyle} />
                     <defs>
-                      <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
-                        <stop offset="0%" stopColor="#6366f1" />
-                        <stop offset="100%" stopColor="#8b5cf6" />
-                      </linearGradient>
+                      <linearGradient id="lineGradSummary" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#10b981" /><stop offset="100%" stopColor="#4edea3" /></linearGradient>
                     </defs>
-                    <Line type="monotone" dataKey="score" stroke="url(#lineGrad)" strokeWidth={3} dot={{ fill: '#8b5cf6', r: 3 }} />
+                    <Line type="monotone" dataKey="score" stroke="url(#lineGradSummary)" strokeWidth={3} dot={{ fill: '#4edea3', r: 3 }} />
                   </LineChart>
                 </ResponsiveContainer>
               ) : (
-                <p className="text-slate-500 text-sm text-center py-8">No data available</p>
+                <p style={{ color: 'var(--gb-text-muted)', fontSize: '0.875rem', textAlign: 'center', padding: '2rem' }}>No data available</p>
               )}
             </div>
 
             {/* Bar Chart */}
-            <div className="rounded-3xl p-6 border border-white/5 bg-white/5 flex-1">
-              <h4 className="font-bold text-slate-300 mb-6">Average Score Per Set</h4>
+            <div className="glass-card" style={{ padding: '1.5rem', borderRadius: '1.5rem', flex: 1 }}>
+              <h4 style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--gb-text-dim)', marginBottom: '1.5rem' }}>Average Score Per Set</h4>
               {setChartData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={140}>
                   <BarChart data={setChartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#333348" />
-                    <XAxis dataKey="set" stroke="#908fa0" fontSize={10} />
-                    <YAxis domain={[0, 100]} stroke="#908fa0" fontSize={10} />
-                    <Tooltip contentStyle={{ background: '#1e1e32', border: '1px solid #464554', borderRadius: '8px', color: '#e2e0fc' }} />
-                    <Bar dataKey="avg" fill="#6366f1" radius={[6, 6, 0, 0]} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#3c4a42" />
+                    <XAxis dataKey="set" stroke="#86948a" fontSize={10} />
+                    <YAxis domain={[0, 100]} stroke="#86948a" fontSize={10} />
+                    <Tooltip contentStyle={chartStyle} />
+                    <Bar dataKey="avg" fill="#10b981" radius={[6, 6, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
-                <p className="text-slate-500 text-sm text-center py-8">No data available</p>
+                <p style={{ color: 'var(--gb-text-muted)', fontSize: '0.875rem', textAlign: 'center', padding: '2rem' }}>No data available</p>
               )}
             </div>
           </div>
         </div>
 
-        {/* Session History (if available) */}
-        {historyData.length > 1 && (
-          <div className="rounded-3xl p-6 border border-white/5 bg-white/5 mb-12">
-            <h4 className="font-bold text-slate-300 mb-6">Session Progress Over Time</h4>
-            <ResponsiveContainer width="100%" height={140}>
-              <AreaChart data={historyData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#333348" />
-                <XAxis dataKey="session" stroke="#908fa0" fontSize={10} />
-                <YAxis domain={[0, 100]} stroke="#908fa0" fontSize={10} />
-                <Tooltip contentStyle={{ background: '#1e1e32', border: '1px solid #464554', borderRadius: '8px', color: '#e2e0fc' }} />
-                <defs>
-                  <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#6366f1" stopOpacity={0.4} />
-                    <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <Area type="monotone" dataKey="score" stroke="#6366f1" strokeWidth={2} fill="url(#areaGrad)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-
         {/* New Session Button */}
-        <div className="pb-12">
+        <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: '3rem' }}>
           <button
             onClick={() => dispatch({ type: 'RESET' })}
-            className="w-full md:w-auto md:min-w-[320px] mx-auto block py-5 px-8 rounded-2xl bg-gradient-to-r from-indigo-500 to-violet-600 text-white font-black text-lg shadow-[0_20px_50px_rgba(99,102,241,0.3)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3"
+            className="btn-start"
+            style={{ padding: '1rem 4rem', fontSize: '1.125rem', fontWeight: 900, borderRadius: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.75rem', transform: 'scale(1.1)' }}
           >
             <PlusCircle size={22} />
             New Session
