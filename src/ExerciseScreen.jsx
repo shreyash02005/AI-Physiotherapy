@@ -21,6 +21,7 @@ const SLOW_DOWN_AUDIO_INTERVAL = 8000;
 export default function ExerciseScreen({ state, dispatch, videoRef, canvasRef, poseLandmarkerRef, animFrameRef, repPhaseRef, lastCompensationTimeRef, frameScoresRef, formScoreRef, compensationAlertRef }) {
   const { selectedExercise, currentSet, currentRep, customSets, customReps, isMuted, streak, settings } = state;
   const [hasStarted, setHasStarted] = useState(false);
+  const hasStartedRef = useRef(false);
   const [showSlowDown, setShowSlowDown] = useState(false);
   const compensationTimersRef = useRef({});
   const processFrameRef = useRef(null);
@@ -72,38 +73,44 @@ export default function ExerciseScreen({ state, dispatch, videoRef, canvasRef, p
     };
 
     const startDetectionLoop = () => {
-      const detect = () => {
-        if (!mounted || !videoRef.current || !poseLandmarkerRef.current || !canvasRef.current) {
-          animFrameRef.current = requestAnimationFrame(detect);
+      const detectPose = () => {
+        if (!mounted || !videoRef.current || !canvasRef.current) {
+          animFrameRef.current = requestAnimationFrame(detectPose);
           return;
         }
         const video = videoRef.current;
         if (video.readyState < 2) {
-          animFrameRef.current = requestAnimationFrame(detect);
+          animFrameRef.current = requestAnimationFrame(detectPose);
           return;
         }
 
-        const result = poseLandmarkerRef.current.detectForVideo(video, performance.now());
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
 
-        // Draw video frame (mirrored)
-        ctx.save();
+        // 1. Clear the canvas
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 2. Draw the Video Frame FIRST (mirrored)
+        ctx.save();
         ctx.translate(canvas.width, 0);
         ctx.scale(-1, 1);
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         ctx.restore();
 
-        if (result?.landmarks?.length > 0) {
-          const landmarks = result.landmarks[0];
-          drawSkeleton(landmarks, canvas, ctx);
-          if (processFrameRef.current) processFrameRef.current(landmarks);
+        // 3. Draw the Skeleton SECOND
+        if (hasStartedRef.current && poseLandmarkerRef.current) {
+          const startTimeMs = performance.now();
+          const result = poseLandmarkerRef.current.detectForVideo(video, startTimeMs);
+          if (result?.landmarks?.length > 0) {
+            const landmarks = result.landmarks[0];
+            drawSkeleton(landmarks, canvas, ctx);
+            if (processFrameRef.current) processFrameRef.current(landmarks);
+          }
         }
 
-        animFrameRef.current = requestAnimationFrame(detect);
+        animFrameRef.current = requestAnimationFrame(detectPose);
       };
-      animFrameRef.current = requestAnimationFrame(detect);
+      animFrameRef.current = requestAnimationFrame(detectPose);
     };
 
     const initAndStart = async () => {
@@ -351,7 +358,19 @@ export default function ExerciseScreen({ state, dispatch, videoRef, canvasRef, p
 
   return (
     <div className="fixed inset-0 overflow-hidden" style={{ backgroundColor: 'var(--gb-bg)' }}>
-      <video ref={videoRef} autoPlay playsInline muted className="opacity-0 absolute w-px h-px pointer-events-none" />
+      <video 
+        ref={videoRef} 
+        autoPlay 
+        playsInline 
+        muted 
+        style={{ 
+          position: 'absolute', 
+          width: '1280px', 
+          height: '720px', 
+          opacity: 0, 
+          pointerEvents: 'none' 
+        }} 
+      />
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full object-cover" />
 
       {/* Camera error */}
@@ -467,7 +486,10 @@ export default function ExerciseScreen({ state, dispatch, videoRef, canvasRef, p
       <div style={{ position: 'absolute', bottom: '3rem', right: '2rem', zIndex: 20, display: 'flex', gap: '1rem' }}>
         {!hasStarted ? (
           <button
-            onClick={() => setHasStarted(true)}
+            onClick={() => {
+              hasStartedRef.current = true;
+              setHasStarted(true);
+            }}
             className="animate-pulse-glow"
             style={{
               display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.5)',
